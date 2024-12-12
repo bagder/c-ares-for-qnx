@@ -11,7 +11,7 @@ HEAD(Open Source for QNX: c-ares and curl)
 
 TITLE(Open Source for QNX)
 <p>
-SUBTITLE(c-ares)
+SUBTITLE(c-ares for QNX)
 <p>
 
 #ifdef QNX_SDK70_DATE
@@ -69,15 +69,10 @@ SUBTITLE(c-ares)
 </div>
 #endif
 
+<p> Build scripts and setup: <a
+ href="https://github.com/bagder/c-ares-for-qnx">c-ares-for-QNX</a>
 
-
-
-
-
-
-
-
-SUBTITLE(curl)
+TITLE(curl for QNX)
 <p>
   <a href="https://curl.se/qnx/">curl for QNX</a>
  
