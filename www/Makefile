@@ -8,6 +8,8 @@ ACTION=@echo generating $@; \
 PAGES=index.html support.html
 CSS=qnx.css
 IMAGES=dl.svg
+WEBROOT=$$HOME/qnx_html/
+DLFILES=$$HOME/qnx_html/dl/
 
 all: $(PAGES)
 
@@ -25,4 +27,5 @@ clean:
 	find . -name "*~" -exec rm {} \;
 
 deploy:
-	scp $(PAGES) $(CSS) $(IMAGES) silly:qnx_html/
+	cp -p $(PAGES) $(CSS) $(IMAGES) $(WEBROOT)
+	cp -p dl/c-ares* $(DLFILES)
