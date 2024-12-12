@@ -28,6 +28,7 @@ SUBTITLE(c-ares for QNX)
 
 <table>
 <tr><td> <b>c-ares home</b> </td><td> <a href="https://c-ares.org">c-ares.org</a></td></tr>
+<tr><td> <b>QNX port</b> </td> <td><a href="https://github.com/qnx-ports/c-ares">github.com/qnx-ports/c-ares</a></td></tr>
 <tr><td> <b>c-ares version</b> </td><td> QNX_CARESVER </td></tr>
 <tr><td> <b>Build</b> </td><td> QNX_CARESVER_PACKAGE </td></tr>
 <tr><td> <b>Date</b> </td><td> QNX_CARESDATE </td></tr>
