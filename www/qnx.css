@@ -1,0 +1,157 @@
+BODY {
+ margin: 0px 0px 0px 0px;
+ background-color: white; 
+ font-family: Lora, arial, helvetica, ariel, sans-serif;
+ font-size: 16pt;
+ color: black;
+}
+    
+.title {
+ color: black;
+ font-size: 200%;
+ font-weight: bold;
+}
+
+.subtitle {
+ font-size: 140%;
+ padding-left: 5px;
+ border-bottom: 1px solid black;
+}
+
+P {
+ color: black;
+ padding-left: 5px;
+}
+
+.contents {
+  padding-top: 30px;
+  margin-top: 0px;
+  max-width: 60em;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+LI {
+ color: black;
+}
+
+.big {
+ font-size: 120%;
+ vertical-align: baseline;
+}
+
+.address {
+ font-style: italic;
+}
+
+.alert {
+    color: #ff0000;
+}
+
+.grey {
+  background-color: #f0f0f0;
+  color: black;
+}
+
+.box {
+  border-width: 1px;
+  border-style: solid;
+  border-color: #000000;
+  padding: 2px 2px 2px 2px;
+}
+
+.boxnarrow {
+  width: 600px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #000000;
+  padding: 2px 2px 2px 2px;
+}
+
+pre.quote {
+  border-style: solid;
+  border-width: thin;
+  border-color: black;
+  padding: 2px 2px 2px 2px;
+
+  background-color: #f0f0ff; 
+  width: 90%;
+  margin-left: 5%;
+  margin-right: 5%;
+}
+
+/* top menu */
+div.topmenu {
+    background-color: #f0f0ff;
+    color: #000000;
+    font-size: 130%;
+    text-align: center;
+}
+
+a.topmenu {
+    padding-left: 5px;
+    padding-right: 5px;
+}
+
+div.main {
+    margin: 4px 4px 4px 4px;
+}
+
+.odd {
+  background-color: #e0e0e0;
+}
+
+a {
+  text-decoration: none;
+  color: #0000c0;
+}
+
+a:hover {
+  text-decoration: none;
+  color: #6060c0;
+}
+
+.tiny {
+  width: 40px;
+}
+
+/* DARK MODE PROPERTIES */
+/* These will override all settings above */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #212121;
+        /* Try to keep it a bit light but not too grey,
+           so it does not impact people with accessibility needs */
+        color: #fbfbfb;
+    }
+    P {
+        color: #fbfbfb;
+    }
+    a {
+        color: #8080f0;
+    }
+
+    a:hover {
+        color: #202080;
+    }
+
+    .title {
+        color: #fbfbfb;
+    }
+
+    .subtitle {
+        border-bottom: 1px solid #fbfbfb;
+    }
+    LI {
+        color: #fbfbfb;
+    }
+    /* top menu */
+    div.topmenu {
+        background-color: #404040;
+        color: #e0e0e0;
+    }
+
+    .odd {
+      background-color: #404040;
+    }
+}
