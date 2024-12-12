@@ -4,7 +4,7 @@ Scripts and configs for building c-ares for [QNX](https://blackberry.qnx.com/).
 
 ## Download packages
 
-c-ares packages for QNX are made available for download at XXXXXX
+c-ares packages for QNX are made available for download at https://qnx.haxx.se/
 
 ## Prerequisites
 
