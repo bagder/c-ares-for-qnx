@@ -14,6 +14,15 @@ TITLE(Open Source for QNX)
 SUBTITLE(c-ares for QNX)
 <p>
 
+c-ares is a modern DNS (stub) resolver library, written in C. It provides
+interfaces for asynchronous queries while trying to abstract the intricacies
+of the underlying DNS protocol. It was originally intended for applications
+which need to perform DNS queries without blocking, or need to perform
+multiple DNS queries in parallel.
+
+<p>
+
+
 #ifdef QNX_SDK70_DATE
 # define QNX_CARESDATE QNX_SDK70_DATE
 #else
@@ -75,6 +84,14 @@ SUBTITLE(c-ares for QNX)
  href="https://github.com/bagder/c-ares-for-qnx">c-ares-for-QNX</a>
 
 TITLE(curl for QNX)
+
+<p> curl is used in command lines or scripts to transfer Internet data
+specified as URLs. curl is also <b>libcurl</b>, used in cars, television sets,
+routers, printers, audio equipment, mobile phones, tablets, medical devices,
+settop boxes, computer games, media players and is the Internet transfer
+engine for countless software applications in over <i>twenty billion
+installations</i>.
+
 <p>
   <a href="https://curl.se/qnx/">curl for QNX</a>
  
