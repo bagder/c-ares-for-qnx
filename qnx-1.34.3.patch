@@ -1,0 +1,1210 @@
+diff --git a/configure.ac b/configure.ac
+index 5f848c28..272e5c87 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -43,10 +43,11 @@ AC_USE_SYSTEM_EXTENSIONS
+ AX_CXX_COMPILE_STDCXX_14([noext],[optional])
+ AM_INIT_AUTOMAKE([foreign subdir-objects 1.9.6])
+ LT_INIT([win32-dll,pic,disable-fast-install,aix-soname=svr4])
+ AC_LANG([C])
+ AC_PROG_CC
++AC_PROG_CXX
+ AM_PROG_CC_C_O
+ AC_PROG_EGREP
+ AC_PROG_INSTALL
+ AC_CANONICAL_HOST
+ AX_COMPILER_VENDOR
+@@ -111,10 +112,11 @@ AC_ARG_ENABLE(tests,
+       build_tests="no"
+     fi
+   ]
+ )
+ 
++
+ AC_ARG_ENABLE(cares-threads,
+   AS_HELP_STRING([--disable-cares-threads], [Disable building of thread safety support]),
+   [ CARES_THREADS=${enableval} ],
+   [ CARES_THREADS=yes ])
+ 
+@@ -239,24 +241,36 @@ if test "$symbol_hiding" != "no" ; then
+   fi
+ fi
+ AM_CONDITIONAL(CARES_SYMBOL_HIDING, test "x$symbol_hiding" = "xyes")
+ AC_SUBST(CARES_SYMBOL_HIDING_CFLAG)
+ 
++dnl Cross-compilation for qnx uses QCC, which does not support c90. QNX's CXX stdlib implementation also requires a more modern standard.
++AC_ARG_ENABLE(qcc_compat,
++  AS_HELP_STRING([--enable-qcc-compat], [Allows proper usage of the QNX stdlib.]),
++  [qcc_compat="$enableval"]
++)
+ 
+ if test "$enable_warnings" = "yes"; then
+   AX_APPEND_COMPILE_FLAGS([-Wall -Wextra -Waggregate-return -Wcast-align -Wcast-qual -Wconversion -Wdeclaration-after-statement -Wdouble-promotion -Wfloat-equal -Wformat-security -Winit-self -Wjump-misses-init -Wlogical-op -Wmissing-braces -Wmissing-declarations -Wmissing-format-attribute -Wmissing-include-dirs -Wmissing-prototypes -Wnested-externs -Wno-coverage-mismatch -Wold-style-definition -Wpacked -Wpedantic -Wpointer-arith -Wredundant-decls -Wshadow -Wsign-conversion -Wstrict-overflow -Wstrict-prototypes -Wtrampolines -Wundef -Wunreachable-code -Wunused -Wvariadic-macros -Wvla -Wwrite-strings -Werror=implicit-int -Werror=implicit-function-declaration -Werror=partial-availability -Wno-long-long ],
+     [AM_CFLAGS], [-Werror])
+ 
+   dnl Android requires c99, all others should use c90
+   case $host_os in
+     *android*)
+-      AX_APPEND_COMPILE_FLAGS([-std=c99], [AM_CFLAGS], [-Werror])
++      standard_to_use = "c99"
+       ;;
+     *)
+-      AX_APPEND_COMPILE_FLAGS([-std=c90], [AM_CFLAGS], [-Werror])
++      standard_to_use = "c90"
+       ;;
+   esac
++
++  dnl QNX cross-compilation requires c11 or higher. passed in as a flag
++  if test $qcc_compat = "yes"; then
++    standard_to_use = "c++14 -lsocket"
++  fi
++
++  AX_APPEND_COMPILE_FLAGS([-std=$standard_to_use], [AM_CFLAGS], [-Werror])
+ fi
+ 
+ if test "$ax_cv_c_compiler_vendor" = "intel"; then
+   AX_APPEND_COMPILE_FLAGS([-shared-intel], [AM_CFLAGS])
+ fi
+@@ -811,10 +825,17 @@ if test "x$build_tests" != "xno" -a "x$cross_compiling" = "xyes" ; then
+     build_tests=no
+   else
+     AC_MSG_ERROR([*** Tests not supported when cross compiling])
+   fi
+ fi
++
++dnl Forces compiling of tests. Useful for cross compiling; as with correct libtools env variable settings, tests can cross-compile. 
++AC_ARG_ENABLE(tests_build_override,
++  AS_HELP_STRING([--enable-tests-build-override], [overrides all checks and builds tests.]),
++  [build_tests="$enableval"]
++)
++
+ if test "x$build_tests" != "xno" ; then
+   PKG_CHECK_MODULES([GMOCK], [gmock], [ have_gmock=yes ], [ have_gmock=no ])
+   if test "x$have_gmock" = "xno" ; then
+     if test "x$build_tests" = "xmaybe" ; then
+       AC_MSG_WARN([gmock could not be found, not building tests])
+diff --git a/include/ares.h b/include/ares.h
+index 139c6d66..7fe3ec78 100644
+--- a/include/ares.h
++++ b/include/ares.h
+@@ -72,11 +72,11 @@
+    libc5-based Linux systems. Only include it on system that are known to
+    require it! */
+ #if defined(_AIX) || defined(__NOVELL_LIBC__) || defined(__NetBSD__) || \
+   defined(__minix) || defined(__SYMBIAN32__) || defined(__INTEGRITY) || \
+   defined(ANDROID) || defined(__ANDROID__) || defined(__OpenBSD__) ||   \
+-  defined(__QNXNTO__) || defined(__MVS__) || defined(__HAIKU__)
++  defined(__QNX__) || defined(__MVS__) || defined(__HAIKU__)
+ #  include <sys/select.h>
+ #endif
+ 
+ #if (defined(NETWARE) && !defined(__NOVELL_LIBC__))
+ #  include <sys/bsdskt.h>
+diff --git a/m4/ax_append_compile_flags.m4 b/m4/ax_append_compile_flags.m4
+index 1f8e7084..9c856356 100644
+--- a/m4/ax_append_compile_flags.m4
++++ b/m4/ax_append_compile_flags.m4
+@@ -1,12 +1,12 @@
+-# ===========================================================================
+-#  http://www.gnu.org/software/autoconf-archive/ax_append_compile_flags.html
+-# ===========================================================================
++# ============================================================================
++#  https://www.gnu.org/software/autoconf-archive/ax_append_compile_flags.html
++# ============================================================================
+ #
+ # SYNOPSIS
+ #
+-#   AX_APPEND_COMPILE_FLAGS([FLAG1 FLAG2 ...], [FLAGS-VARIABLE], [EXTRA-FLAGS])
++#   AX_APPEND_COMPILE_FLAGS([FLAG1 FLAG2 ...], [FLAGS-VARIABLE], [EXTRA-FLAGS], [INPUT])
+ #
+ # DESCRIPTION
+ #
+ #   For every FLAG1, FLAG2 it is checked whether the compiler works with the
+ #   flag.  If it does, the flag is added FLAGS-VARIABLE
+@@ -18,48 +18,29 @@
+ #   If EXTRA-FLAGS is defined, it is added to the current language's default
+ #   flags (e.g. CFLAGS) when the check is done.  The check is thus made with
+ #   the flags: "CFLAGS EXTRA-FLAGS FLAG".  This can for example be used to
+ #   force the compiler to issue an error when a bad flag is given.
+ #
++#   INPUT gives an alternative input source to AC_COMPILE_IFELSE.
++#
+ #   NOTE: This macro depends on the AX_APPEND_FLAG and
+ #   AX_CHECK_COMPILE_FLAG. Please keep this macro in sync with
+ #   AX_APPEND_LINK_FLAGS.
+ #
+ # LICENSE
+ #
+ #   Copyright (c) 2011 Maarten Bosmans <mkbosmans@gmail.com>
+ #
+-#   This program is free software: you can redistribute it and/or modify it
+-#   under the terms of the GNU General Public License as published by the
+-#   Free Software Foundation, either version 3 of the License, or (at your
+-#   option) any later version.
+-#
+-#   This program is distributed in the hope that it will be useful, but
+-#   WITHOUT ANY WARRANTY; without even the implied warranty of
+-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+-#   Public License for more details.
+-#
+-#   You should have received a copy of the GNU General Public License along
+-#   with this program. If not, see <http://www.gnu.org/licenses/>.
+-#
+-#   As a special exception, the respective Autoconf Macro's copyright owner
+-#   gives unlimited permission to copy, distribute and modify the configure
+-#   scripts that are the output of Autoconf when processing the Macro. You
+-#   need not follow the terms of the GNU General Public License when using
+-#   or distributing such scripts, even though portions of the text of the
+-#   Macro appear in them. The GNU General Public License (GPL) does govern
+-#   all other use of the material that constitutes the Autoconf Macro.
+-#
+-#   This special exception to the GPL applies to versions of the Autoconf
+-#   Macro released by the Autoconf Archive. When you make and distribute a
+-#   modified version of the Autoconf Macro, you may extend this special
+-#   exception to the GPL to apply to your modified version as well.
++#   Copying and distribution of this file, with or without modification, are
++#   permitted in any medium without royalty provided the copyright notice
++#   and this notice are preserved.  This file is offered as-is, without any
++#   warranty.
+ 
+-#serial 3
++#serial 7
+ 
+ AC_DEFUN([AX_APPEND_COMPILE_FLAGS],
+-[AC_REQUIRE([AX_CHECK_COMPILE_FLAG])
+-AC_REQUIRE([AX_APPEND_FLAG])
++[AX_REQUIRE_DEFINED([AX_CHECK_COMPILE_FLAG])
++AX_REQUIRE_DEFINED([AX_APPEND_FLAG])
+ for flag in $1; do
+-  AX_CHECK_COMPILE_FLAG([$flag], [AX_APPEND_FLAG([$flag], [$2])], [], [$3])
++  AX_CHECK_COMPILE_FLAG([$flag], [AX_APPEND_FLAG([$flag], [$2])], [], [$3], [$4])
+ done
+ ])dnl AX_APPEND_COMPILE_FLAGS
+diff --git a/m4/ax_append_flag.m4 b/m4/ax_append_flag.m4
+index 1d38b76f..dd6d8b61 100644
+--- a/m4/ax_append_flag.m4
++++ b/m4/ax_append_flag.m4
+@@ -1,7 +1,7 @@
+ # ===========================================================================
+-#      http://www.gnu.org/software/autoconf-archive/ax_append_flag.html
++#      https://www.gnu.org/software/autoconf-archive/ax_append_flag.html
+ # ===========================================================================
+ #
+ # SYNOPSIS
+ #
+ #   AX_APPEND_FLAG(FLAG, [FLAGS-VARIABLE])
+@@ -21,49 +21,30 @@
+ # LICENSE
+ #
+ #   Copyright (c) 2008 Guido U. Draheim <guidod@gmx.de>
+ #   Copyright (c) 2011 Maarten Bosmans <mkbosmans@gmail.com>
+ #
+-#   This program is free software: you can redistribute it and/or modify it
+-#   under the terms of the GNU General Public License as published by the
+-#   Free Software Foundation, either version 3 of the License, or (at your
+-#   option) any later version.
+-#
+-#   This program is distributed in the hope that it will be useful, but
+-#   WITHOUT ANY WARRANTY; without even the implied warranty of
+-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+-#   Public License for more details.
+-#
+-#   You should have received a copy of the GNU General Public License along
+-#   with this program. If not, see <http://www.gnu.org/licenses/>.
+-#
+-#   As a special exception, the respective Autoconf Macro's copyright owner
+-#   gives unlimited permission to copy, distribute and modify the configure
+-#   scripts that are the output of Autoconf when processing the Macro. You
+-#   need not follow the terms of the GNU General Public License when using
+-#   or distributing such scripts, even though portions of the text of the
+-#   Macro appear in them. The GNU General Public License (GPL) does govern
+-#   all other use of the material that constitutes the Autoconf Macro.
+-#
+-#   This special exception to the GPL applies to versions of the Autoconf
+-#   Macro released by the Autoconf Archive. When you make and distribute a
+-#   modified version of the Autoconf Macro, you may extend this special
+-#   exception to the GPL to apply to your modified version as well.
++#   Copying and distribution of this file, with or without modification, are
++#   permitted in any medium without royalty provided the copyright notice
++#   and this notice are preserved.  This file is offered as-is, without any
++#   warranty.
+ 
+-#serial 2
++#serial 8
+ 
+ AC_DEFUN([AX_APPEND_FLAG],
+-[AC_PREREQ(2.59)dnl for _AC_LANG_PREFIX
+-AS_VAR_PUSHDEF([FLAGS], [m4_default($2,_AC_LANG_PREFIX[FLAGS])])dnl
+-AS_VAR_SET_IF(FLAGS,
+-  [case " AS_VAR_GET(FLAGS) " in
+-    *" $1 "*)
+-      AC_RUN_LOG([: FLAGS already contains $1])
+-      ;;
+-    *)
+-      AC_RUN_LOG([: FLAGS="$FLAGS $1"])
+-      AS_VAR_SET(FLAGS, ["AS_VAR_GET(FLAGS) $1"])
+-      ;;
+-   esac],
+-  [AS_VAR_SET(FLAGS,["$1"])])
++[dnl
++AC_PREREQ(2.64)dnl for _AC_LANG_PREFIX and AS_VAR_SET_IF
++AS_VAR_PUSHDEF([FLAGS], [m4_default($2,_AC_LANG_PREFIX[FLAGS])])
++AS_VAR_SET_IF(FLAGS,[
++  AS_CASE([" AS_VAR_GET(FLAGS) "],
++    [*" $1 "*], [AC_RUN_LOG([: FLAGS already contains $1])],
++    [
++     AS_VAR_APPEND(FLAGS,[" $1"])
++     AC_RUN_LOG([: FLAGS="$FLAGS"])
++    ])
++  ],
++  [
++  AS_VAR_SET(FLAGS,[$1])
++  AC_RUN_LOG([: FLAGS="$FLAGS"])
++  ])
+ AS_VAR_POPDEF([FLAGS])dnl
+ ])dnl AX_APPEND_FLAG
+diff --git a/m4/ax_check_compile_flag.m4 b/m4/ax_check_compile_flag.m4
+index c3a8d695..bd753b34 100644
+--- a/m4/ax_check_compile_flag.m4
++++ b/m4/ax_check_compile_flag.m4
+@@ -1,12 +1,12 @@
+ # ===========================================================================
+-#   http://www.gnu.org/software/autoconf-archive/ax_check_compile_flag.html
++#  https://www.gnu.org/software/autoconf-archive/ax_check_compile_flag.html
+ # ===========================================================================
+ #
+ # SYNOPSIS
+ #
+-#   AX_CHECK_COMPILE_FLAG(FLAG, [ACTION-SUCCESS], [ACTION-FAILURE], [EXTRA-FLAGS])
++#   AX_CHECK_COMPILE_FLAG(FLAG, [ACTION-SUCCESS], [ACTION-FAILURE], [EXTRA-FLAGS], [INPUT])
+ #
+ # DESCRIPTION
+ #
+ #   Check whether the given FLAG works with the current language's compiler
+ #   or gives an error.  (Warnings, however, are ignored)
+@@ -17,56 +17,37 @@
+ #   If EXTRA-FLAGS is defined, it is added to the current language's default
+ #   flags (e.g. CFLAGS) when the check is done.  The check is thus made with
+ #   the flags: "CFLAGS EXTRA-FLAGS FLAG".  This can for example be used to
+ #   force the compiler to issue an error when a bad flag is given.
+ #
++#   INPUT gives an alternative input source to AC_COMPILE_IFELSE.
++#
+ #   NOTE: Implementation based on AX_CFLAGS_GCC_OPTION. Please keep this
+ #   macro in sync with AX_CHECK_{PREPROC,LINK}_FLAG.
+ #
+ # LICENSE
+ #
+ #   Copyright (c) 2008 Guido U. Draheim <guidod@gmx.de>
+ #   Copyright (c) 2011 Maarten Bosmans <mkbosmans@gmail.com>
+ #
+-#   This program is free software: you can redistribute it and/or modify it
+-#   under the terms of the GNU General Public License as published by the
+-#   Free Software Foundation, either version 3 of the License, or (at your
+-#   option) any later version.
+-#
+-#   This program is distributed in the hope that it will be useful, but
+-#   WITHOUT ANY WARRANTY; without even the implied warranty of
+-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+-#   Public License for more details.
+-#
+-#   You should have received a copy of the GNU General Public License along
+-#   with this program. If not, see <http://www.gnu.org/licenses/>.
+-#
+-#   As a special exception, the respective Autoconf Macro's copyright owner
+-#   gives unlimited permission to copy, distribute and modify the configure
+-#   scripts that are the output of Autoconf when processing the Macro. You
+-#   need not follow the terms of the GNU General Public License when using
+-#   or distributing such scripts, even though portions of the text of the
+-#   Macro appear in them. The GNU General Public License (GPL) does govern
+-#   all other use of the material that constitutes the Autoconf Macro.
+-#
+-#   This special exception to the GPL applies to versions of the Autoconf
+-#   Macro released by the Autoconf Archive. When you make and distribute a
+-#   modified version of the Autoconf Macro, you may extend this special
+-#   exception to the GPL to apply to your modified version as well.
++#   Copying and distribution of this file, with or without modification, are
++#   permitted in any medium without royalty provided the copyright notice
++#   and this notice are preserved.  This file is offered as-is, without any
++#   warranty.
+ 
+-#serial 2
++#serial 6
+ 
+ AC_DEFUN([AX_CHECK_COMPILE_FLAG],
+-[AC_PREREQ(2.59)dnl for _AC_LANG_PREFIX
++[AC_PREREQ(2.64)dnl for _AC_LANG_PREFIX and AS_VAR_IF
+ AS_VAR_PUSHDEF([CACHEVAR],[ax_cv_check_[]_AC_LANG_ABBREV[]flags_$4_$1])dnl
+ AC_CACHE_CHECK([whether _AC_LANG compiler accepts $1], CACHEVAR, [
+   ax_check_save_flags=$[]_AC_LANG_PREFIX[]FLAGS
+   _AC_LANG_PREFIX[]FLAGS="$[]_AC_LANG_PREFIX[]FLAGS $4 $1"
+-  AC_COMPILE_IFELSE([AC_LANG_PROGRAM()],
++  AC_COMPILE_IFELSE([m4_default([$5],[AC_LANG_PROGRAM()])],
+     [AS_VAR_SET(CACHEVAR,[yes])],
+     [AS_VAR_SET(CACHEVAR,[no])])
+   _AC_LANG_PREFIX[]FLAGS=$ax_check_save_flags])
+-AS_IF([test x"AS_VAR_GET(CACHEVAR)" = xyes],
++AS_VAR_IF(CACHEVAR,yes,
+   [m4_default([$2], :)],
+   [m4_default([$3], :)])
+ AS_VAR_POPDEF([CACHEVAR])dnl
+ ])dnl AX_CHECK_COMPILE_FLAGS
+diff --git a/src/lib/ares_destroy.c b/src/lib/ares_destroy.c
+index 1e5706e0..ace3df26 100644
+--- a/src/lib/ares_destroy.c
++++ b/src/lib/ares_destroy.c
+@@ -67,10 +67,19 @@ void ares_destroy(ares_channel_t *channel)
+ 
+   /* Lock because callbacks will be triggered, and any system-generated
+    * callbacks need to hold a channel lock. */
+   ares_channel_lock(channel);
+ 
++  /* Remove QNX-Specifics */
++  #ifdef __QNX__
++    free(channel->conf_domain);
++    channel->conf_domain = NULL;
++
++    free(channel->conf_resolv);
++    channel->conf_resolv = NULL;
++  #endif
++
+   /* Destroy all queries */
+   node = ares_llist_node_first(channel->all_queries);
+   while (node != NULL) {
+     ares_llist_node_t *next  = ares_llist_node_next(node);
+     ares_query_t      *query = ares_llist_node_claim(node);
+diff --git a/src/lib/ares_gethostbyaddr.c b/src/lib/ares_gethostbyaddr.c
+index a7acf3c4..fb66421f 100644
+--- a/src/lib/ares_gethostbyaddr.c
++++ b/src/lib/ares_gethostbyaddr.c
+@@ -64,10 +64,16 @@ void ares_gethostbyaddr_nolock(ares_channel_t *channel, const void *addr,
+                                int addrlen, int family,
+                                ares_host_callback callback, void *arg)
+ {
+   struct addr_query *aquery;
+ 
++
++  /* QNX-Specific: check for changed configuration */
++  #ifdef __QNX__
++    qnx_check_for_config_reload(channel);
++  #endif
++
+   if (family != AF_INET && family != AF_INET6) {
+     callback(arg, ARES_ENOTIMP, 0, NULL);
+     return;
+   }
+ 
+diff --git a/src/lib/ares_gethostbyname.c b/src/lib/ares_gethostbyname.c
+index 56de7295..ff3d3065 100644
+--- a/src/lib/ares_gethostbyname.c
++++ b/src/lib/ares_gethostbyname.c
+@@ -100,10 +100,15 @@ void ares_gethostbyname(ares_channel_t *channel, const char *name, int family,
+                         ares_host_callback callback, void *arg)
+ {
+   struct ares_addrinfo_hints hints;
+   struct host_query         *ghbn_arg;
+ 
++  /* QNX-Specific: check for changed configuration */
++  #ifdef __QNX__
++    qnx_check_for_config_reload(channel);
++  #endif
++
+   if (!callback) {
+     return;
+   }
+ 
+   memset(&hints, 0, sizeof(hints));
+diff --git a/src/lib/ares_init.c b/src/lib/ares_init.c
+index ae78262a..5e9c8dcc 100644
+--- a/src/lib/ares_init.c
++++ b/src/lib/ares_init.c
+@@ -62,10 +62,199 @@
+ #endif
+ 
+ #include "ares_inet_net_pton.h"
+ #include "event/ares_event.h"
+ 
++#ifdef __QNX__
++/***
++ * When updating this port to work with the recursive file system and with the newer version, I foudn these functions.
++ * I'm pretty sure these are part of libsocket, but adding -lsocket to the compiler options in configure.ac did not
++ * work. They really do not belong in the c-ares code but seem to be necessary despite the code duplication - I would recommend
++ * looking into fixing this.
++ * 
++ * I'm pretty sure this is just a lapse in my knowledge of QNX, so hopefully it is an easy fix.
++ * 
++ * Best of luck! -JM
++ */
++
++/* CODE DUPLICATION WARNING: This code is a duplicate of code in
++ * libsocket (resolve/res_init.c) */
++static char *
++getconf(int token)
++{
++  size_t len;
++  char *buf;
++  char *cp;
++
++  if((len=confstr(token,NULL,0))==0) {
++    return(NULL);  /* Token not set */
++  }
++
++  if((buf=malloc(len))==NULL)
++    return(NULL);
++  if(confstr(token,buf,len)==0){
++    *buf = '\0';
++  }
++
++  cp=buf;
++  while(*cp != '\0'){
++    if(*cp=='_')
++    *cp=' ';
++    cp++;
++  }
++
++  return(buf);
++}
++
++
++/* CODE DUPLICATION WARNING: This code is a duplicate of code in
++ * libsocket (resolve/res_init.c) */
++/* returns 1 if the values differ, 0 otherwise */
++static int
++res_conf_str_used_and_differs(const char * previous_value, int token)
++{
++  if (previous_value == NULL || previous_value[0] == '\0') {
++    /* We never used the previous value, so we must be loading via
++     * another technique or the value has changed. Do not cause
++     * needs_reload() to return 0 as a timeout may have occured.
++     */
++    return 1;
++  }
++
++  char * current_value = getconf(token);
++  if (NULL == current_value || current_value[0] == '\0') {
++    /* We could not get a value, or we ran into a memory issue of
++     * some sort. Do not cause needs_reload() to return 0 as a
++     * timeout may have occured.
++     */
++    return 1;
++  }
++
++  int res = (strcmp(previous_value, current_value) == 0) ? 0 : 1;
++  free(current_value);
++  return res;
++}
++
++
++
++
++/* Similar to config_search() defined in ares_sysconfig_files.c */
++static ares_status_t config_domain(ares_channel_t *channel, const char *str,
++                                   size_t max_domains)
++{
++  if (channel->domains && channel->ndomains > 0) {
++    /* if we already have some domains present, free them first */
++    ares_strsplit_free(channel->domains, channel->ndomains);
++    channel->domains  = NULL;
++    channel->ndomains = 0;
++  }
++
++  channel->domains = ares_strsplit(str, ", ", &channel->ndomains);
++  if (channel->domains == NULL) {
++    return ARES_ENOMEM;
++  }
++
++  /* Truncate if necessary */
++  if (max_domains && channel->ndomains > max_domains) {
++    size_t i;
++    for (i = max_domains; i < channel->ndomains; i++) {
++      ares_free(channel->domains[i]);
++      channel->domains[i] = NULL;
++    }
++    channel->ndomains = max_domains;
++  }
++
++  return ARES_SUCCESS;
++}
++
++static ares_status_t init_by_qnx_conf(ares_channel_t *channel)
++{
++    int status = ARES_SUCCESS;
++    char *p;
++
++    ares_channel_lock(channel);
++
++    /* CS_RESOLVE and CS_DOMAIN could be set independently */
++
++    if (ares_slist_len(channel->servers) == 0) {  /* don't override ARES_OPT_SERVER */
++      if (channel->conf_resolv)
++        free(channel->conf_resolv);
++      channel->conf_resolv = NULL;
++      char *buf = getconf(_CS_RESOLVE);
++      if (buf) {
++	/* We have configuration information which can set cache time.
++	 * Reset cache time to infinite as a configuration which does
++         * not set cache time is default to infinite.
++	 */
++        channel->max_cache_time_in_nsec = RES_INFINITE_CACHE_TIME;
++        channel->conf_resolv = strdup(buf); /* make a copy as strtok modifies the original string */
++        p = strtok(buf, " \t\n\r");
++        while (p) {
++          if (strcasecmp(p, "nameserver") == 0) {
++            p = strtok(NULL, " \t\n\r");
++            if (p) {
++	      status = ares_sconfig_append_fromstr(channel, &sysconfig.sconfig, p, ARES_TRUE);
++	      if (status != ARES_SUCCESS) {
++		goto out;
++	      }
++	      status = ares_servers_update(channel, sysconfig.sconfig, ARES_FALSE);
++	      if (status != ARES_SUCCESS) {
++		goto out;
++	      }
++            }
++          } else if (strcasecmp(p, "nocache") == 0) {
++            /* we expect a second parameter, typically "on", but we
++             * don't actually look at the value currently
++             * NOTE: this is mimicking the existing behaviour in the
++             * resolve library in libsocket*/
++            p = strtok(NULL, " \t\n\r");
++            channel->max_cache_time_in_nsec = 1; /* Do not cache */
++          } else if (strcasecmp(p, "maxcachetime") == 0) {
++            p = strtok(NULL, " \t\n\r");
++            if (p) {
++              char * endptr = NULL;
++              unsigned long v = strtoul(p, &endptr, 0);
++              if (!(((endptr == p) && (0 == v)) ||
++                  ((ULONG_MAX == v) && (ERANGE == errno)))) {
++                /* save after converting from milliseconds to nanoseconds */
++                channel->max_cache_time_in_nsec = (uint64_t)v * (uint64_t)1000 * (uint64_t)1000;
++              }
++            }
++          }
++          p = strtok(NULL, " \t\n\r");
++        }
++        free(buf);
++      }
++    }
++
++    /* CS_RESOLVE and CS_DOMAIN could be set independently */
++
++    if (channel->ndomains == -1) {
++      if (channel->conf_domain)
++        free(channel->conf_domain);
++      channel->conf_domain = getconf(_CS_DOMAIN);
++      if (channel->conf_domain) {
++        status = config_domain(channel, channel->conf_domain, 1);
++	if (status != ARES_SUCCESS) {
++	  goto out;
++	}
++      }
++    }
++
++    /* record the last load time */
++    /* NOTE: if res_conf_time is ever adjusted to use the time a file is written, the clock
++     * source may need to be changed to accommodate how file system times are derived
++     */
++    clock_gettime(CLOCK_MONOTONIC, &channel->res_conf_time);
++
++out:
++    ares_channel_unlock(channel);
++    return status;
++}
++
++#endif /* __QNX__ */
++
+ int ares_init(ares_channel_t **channelptr)
+ {
+   return ares_init_options(channelptr, NULL, 0);
+ }
+ 
+@@ -249,10 +438,31 @@ int ares_init_options(ares_channel_t           **channelptr,
+   if (!channel) {
+     *channelptr = NULL;
+     return ARES_ENOMEM;
+   }
+ 
++  /* QNX-Specific Setup: Conf domains and resolutions*/
++  #ifdef __QNXNTO__
++    /* NOTE: if res_conf_time is ever adjusted to use the time a file is written, the clock
++    * source may need to be changed to accommodate how file system times are derived
++    */
++    clock_gettime(CLOCK_MONOTONIC, &(channel->res_conf_time));
++
++    /* QNX extensions include the ability to reload the configuration. There
++    * are several locations to do this from. If done from the C-ARES API, we
++    * don't want to override this as it has the highest priority. It has no
++    * concept of cache timeout, so the default should be
++    * RES_INFINIT_CACHE_TIME. If there is a source that has the concept of
++    * a cache timeout, it can set it, and if used based on priority it will
++    * timeout, and the next highest priority source will be used.
++    */
++
++    channel->max_cache_time_in_nsec = RES_INFINITE_CACHE_TIME;
++    channel->conf_domain = NULL;
++    channel->conf_resolv = NULL;
++  #endif /* __QNX__ */
++
+   /* We are in a good state */
+   channel->sys_up = ARES_TRUE;
+ 
+   /* One option where zero is valid, so set default value here */
+   channel->ndots = 1;
+@@ -333,10 +543,21 @@ int ares_init_options(ares_channel_t           **channelptr,
+       DEBUGF(fprintf(stderr, "Error: init_by_sysconfig failed: %s\n",
+                      ares_strerror(status)));
+     }
+   }
+ 
++  /* QNX-Specific: Copy above format for QNX specific configs*/
++  #ifdef __QNX__
++    if (status == ARES_SUCCESS) {
++      status = init_by_qnx_conf(channel);
++      if (status != ARES_SUCCESS) {
++        DEBUGF(fprintf(stderr, "Error: init_by_qnx_conf failed: %s\n",
++                      ares_strerror(status)));
++      }
++    }
++  #endif /* __QNX__ */
++
+   /*
+    * No matter what failed or succeeded, seed defaults to provide
+    * useful behavior for things that we missed.
+    */
+   status = init_by_defaults(channel);
+@@ -564,10 +785,19 @@ void ares_set_local_dev(ares_channel_t *channel, const char *local_dev_name)
+ {
+   if (channel == NULL) {
+     return;
+   }
+ 
++  /* Case for NULL on QNX*/
++  #ifdef __QNX__
++    if (local_dev_name == NULL) {
++      memset(channel->local_dev_name, 0x00, sizeof(channel->local_dev_name));
++      return;
++    }
++  #endif
++  
++
+   ares_channel_lock(channel);
+   ares_strcpy(channel->local_dev_name, local_dev_name,
+               sizeof(channel->local_dev_name));
+   channel->local_dev_name[sizeof(channel->local_dev_name) - 1] = 0;
+   ares_channel_unlock(channel);
+@@ -596,5 +826,119 @@ int ares_set_sortlist(ares_channel_t *channel, const char *sortstr)
+     channel->optmask |= ARES_OPT_SORTLIST;
+   }
+   ares_channel_unlock(channel);
+   return (int)status;
+ }
++
++
++/* QNX-Specific Functions written for this port*/
++#ifdef __QNX__
++/* returns 1 if the resolver information should be reloaded,
++ * returns 0 if there is no need to reload */
++static int needs_reload(ares_channel channel, int force)
++{
++  if (NULL == channel)
++    return 0;
++
++  if (!force) {
++    /* if caching is disabled (this is the default), we never reload after we
++     * have loaded the first time regardless of what's changed
++     */
++    uint64_t max_cache_time_in_nsec = channel->max_cache_time_in_nsec;
++    if (max_cache_time_in_nsec == RES_INFINITE_CACHE_TIME) {
++      return 0;
++    }
++
++    /* if we haven't exceeded the timeout, no need to reload */
++    if (max_cache_time_in_nsec > 0) {
++      struct timespec ts;
++      clock_gettime(CLOCK_MONOTONIC, &ts);
++      uint64_t now = timespec2nsec(&ts);
++      uint64_t then = timespec2nsec(&(channel->res_conf_time));
++      if (now - then < max_cache_time_in_nsec) {
++        return 0;
++      }
++    }
++  } else {
++    //Weird debug format that never triggered removed from this spot.
++  }
++
++  /* check to see if the confSTR values of interest were used and have changed
++   * NOTE: we will actually end up reloading the confSTR values in __res_init(), but
++   * we haven't tried to optimize passing them to __res_vinit() so as to keep the
++   * diff smaller against the public version of this library, given the fact that
++   * they won't change that often, we consider this an acceptable impact in the
++   * reload scenario */
++  if ((0 == res_conf_str_used_and_differs(channel->conf_domain, _CS_DOMAIN)) &&
++      (0 == res_conf_str_used_and_differs(channel->conf_resolv, _CS_RESOLVE))) {
++    return 0;
++  }
++
++  return 1;
++}
++
++void qnx_check_for_config_reload(ares_channel channel)
++{
++  qnx_check_for_config_reload_force(channel, 0);
++}
++
++void qnx_check_for_config_reload_force(ares_channel channel, int force)
++{
++  if (!needs_reload(channel, force))
++    return;
++
++  /* cancel all outstanding requests - notifications are sent to callbacks/clients */
++  ares_cancel(channel);
++
++  /* reload the configuration by loading into a new instance and swap
++   * the instances (allowing for easier "freeing" of the data) */
++  ares_channel new_channel;
++  int result = ares_init_options(&new_channel, NULL, 0);
++  if (ARES_SUCCESS != result) {
++    return;
++  }
++
++  {
++    channel->ndots = new_channel->ndots;
++    channel->timeout = new_channel->timeout;
++    channel->tries = new_channel->tries;
++    channel->rotate = new_channel->rotate;
++
++    ares_slist_t *servers  = channel->servers;
++    channel->servers = new_channel->servers;
++    new_channel->servers = servers;
++
++    size_t nsort = channel->nsort;
++    struct apattern * sortlist = channel->sortlist;
++    channel->nsort = new_channel->nsort;
++    channel->sortlist = new_channel->sortlist;
++    new_channel->nsort = nsort;
++    new_channel->sortlist = sortlist;
++
++    size_t ndomains = channel->ndomains;
++    char ** domains = channel->domains;
++    channel->ndomains = new_channel->ndomains;
++    channel->domains = new_channel->domains;
++    new_channel->ndomains = ndomains;
++    new_channel->domains = domains;
++
++    char * lookups = channel->lookups;
++    channel->lookups = new_channel->lookups;
++    new_channel->lookups = lookups;
++
++    channel->res_conf_time = new_channel->res_conf_time;
++    channel->max_cache_time_in_nsec = new_channel->max_cache_time_in_nsec;
++
++    char * conf_domain = channel->conf_domain;
++    char * conf_resolv = channel->conf_resolv;
++    channel->conf_domain = new_channel->conf_domain;
++    channel->conf_resolv = new_channel->conf_resolv;
++    new_channel->conf_domain = conf_domain;
++    new_channel->conf_resolv = conf_resolv;
++  }
++
++  /* Release the temporary object */
++  ares_destroy(new_channel);
++  new_channel = NULL;
++}
++
++#endif /* __QNX__ */
+\ No newline at end of file
+diff --git a/src/lib/ares_options.c b/src/lib/ares_options.c
+index 3082f332..90096e3d 100644
+--- a/src/lib/ares_options.c
++++ b/src/lib/ares_options.c
+@@ -475,10 +475,17 @@ ares_status_t ares_init_by_options(ares_channel_t            *channel,
+       status = ares_init_options_servers(channel, options->servers,
+                                          (size_t)options->nservers);
+       if (status != ARES_SUCCESS) {
+         return status; /* LCOV_EXCL_LINE: OutOfMemory */
+       }
++
++    /* QNX-Specific */
++    #ifdef __QNXNTO__
++      /* Setting the nameservers via this API is an infinite setting */
++      channel->max_cache_time_in_nsec = RES_INFINITE_CACHE_TIME;
++    #endif
++
+     }
+   }
+ 
+   /* Set fields for server failover behavior */
+   if (optmask & ARES_OPT_SERVER_FAILOVER) {
+diff --git a/src/lib/ares_private.h b/src/lib/ares_private.h
+index ce8c3f2d..af80fabc 100644
+--- a/src/lib/ares_private.h
++++ b/src/lib/ares_private.h
+@@ -68,11 +68,17 @@
+ #ifndef HAVE_GETENV
+ #  include "ares_getenv.h"
+ #  define getenv(ptr) ares_getenv(ptr)
+ #endif
+ 
++
++#ifndef __QNX__
+ #define DEFAULT_TIMEOUT 2000 /* milliseconds */
++#else /* !__QNX__ */
++#define DEFAULT_TIMEOUT 3000 /* milliseconds */
++#endif /* __QNX__ */
++
+ #define DEFAULT_TRIES   3
+ #ifndef INADDR_NONE
+ #  define INADDR_NONE 0xffffffff
+ #endif
+ 
+@@ -252,10 +258,17 @@ struct ares_channeldata {
+   ares_htable_asvp_t  *connnode_by_socket;
+ 
+   ares_sock_state_cb   sock_state_cb;
+   void                *sock_state_cb_data;
+ 
++  #ifdef __QNX__
++    struct		timespec res_conf_time;
++    uint64_t		max_cache_time_in_nsec; /* 0 means do not cache (although (options & RES_INIT) == 0 in the same circumstances, RES_INFINITE_CACHE_TIME means never expire the cache (infinite) */
++    char			*conf_domain; /*%< the last read value for _CS_DOMAIN -- used for caching */
++    char			*conf_resolv; /*%< the last read value for _CS_RESOLVE -- used for caching */
++  #endif /* __QNX__ */
++
+   ares_sock_create_callback           sock_create_cb;
+   void                               *sock_create_cb_data;
+ 
+   ares_sock_config_callback           sock_config_cb;
+   void                               *sock_config_cb_data;
+@@ -379,12 +392,20 @@ typedef struct {
+   size_t           ndots;
+   size_t           tries;
+   ares_bool_t      rotate;
+   size_t           timeout_ms;
+   ares_bool_t      usevc;
++
++  #ifdef __QNX__
++    uint64_t	   max_cache_time_in_nsec;
++  #endif /* __QNX__ */
+ } ares_sysconfig_t;
+ 
++#ifdef __QNX__
++  extern ares_sysconfig_t sysconfig;
++#endif /* __QNX__ */
++
+ ares_status_t ares_sysconfig_set_options(ares_sysconfig_t *sysconfig,
+                                          const char       *str);
+ 
+ ares_status_t ares_init_by_environment(ares_sysconfig_t *sysconfig);
+ 
+@@ -466,10 +487,16 @@ ares_status_t ares_in_addr_to_sconfig_llist(const struct in_addr *servers,
+                                             size_t                nservers,
+                                             ares_llist_t        **llist);
+ ares_status_t ares_get_server_addr(const ares_server_t *server,
+                                    ares_buf_t          *buf);
+ 
++#ifdef __QNX__
++  #define RES_INFINITE_CACHE_TIME ((uint64_t)-1)
++  void qnx_check_for_config_reload(ares_channel channel);
++  void qnx_check_for_config_reload_force(ares_channel channel, int force);
++#endif /* __QNX__ */
++
+ struct ares_hosts_entry;
+ typedef struct ares_hosts_entry ares_hosts_entry_t;
+ 
+ void                            ares_hosts_file_destroy(ares_hosts_file_t *hf);
+ ares_status_t ares_hosts_search_ipaddr(ares_channel_t *channel,
+diff --git a/src/lib/ares_sysconfig.c b/src/lib/ares_sysconfig.c
+index 9f0d7e50..4e341f74 100644
+--- a/src/lib/ares_sysconfig.c
++++ b/src/lib/ares_sysconfig.c
+@@ -489,17 +489,31 @@ static ares_status_t ares_sysconfig_apply(ares_channel_t         *channel,
+ 
+   if (sysconfig->usevc) {
+     channel->flags |= ARES_FLAG_USEVC;
+   }
+ 
++  #ifdef __QNX__
++    if (sysconfig->max_cache_time_in_nsec) {
++      channel->max_cache_time_in_nsec = sysconfig->max_cache_time_in_nsec;
++    }
++  #endif /* __QNX__ */
++
+   return ARES_SUCCESS;
+ }
+ 
++#ifdef __QNX__
++ares_sysconfig_t sysconfig;
++#endif  /* __QNX__ */
++
+ ares_status_t ares_init_by_sysconfig(ares_channel_t *channel)
+ {
+   ares_status_t    status;
++
++  /* QNX Specific: Do not put in function scope*/
++  #ifndef __QNX__
+   ares_sysconfig_t sysconfig;
++  #endif
+ 
+   memset(&sysconfig, 0, sizeof(sysconfig));
+   sysconfig.ndots = 1; /* Default value if not otherwise set */
+ 
+ #if defined(USE_WINSOCK)
+diff --git a/src/lib/ares_sysconfig_files.c b/src/lib/ares_sysconfig_files.c
+index 49bc330d..6ce1b823 100644
+--- a/src/lib/ares_sysconfig_files.c
++++ b/src/lib/ares_sysconfig_files.c
+@@ -614,10 +614,29 @@ static ares_status_t parse_resolvconf_line(const ares_channel_t *channel,
+     }
+   } else if (ares_streq(option, "options")) {
+     status = ares_sysconfig_set_options(sysconfig, value);
+   }
+ 
++  #ifdef __QNX__
++    else if (strcmp(option, "nocache") == 0) {
++    /* we expect a second parameter, typically "on", but we
++    * don't actually look at the value currently
++    * NOTE: this is mimicking the existing behaviour in the
++    * resolve library in libsocket*/
++      sysconfig->max_cache_time_in_nsec = 1; /* Do not cache */
++      status = ARES_SUCCESS;
++    }
++    else if (strcmp(option, "maxcachetime") == 0) {
++      unsigned long v = strtoul(value, NULL, 0);
++      if (!(((0 == v)) || ((ULONG_MAX == v) && (ERANGE == errno)))) {
++        /* save after converting from milliseconds to nanoseconds */
++        sysconfig->max_cache_time_in_nsec = (uint64_t)v * (uint64_t)1000 * (uint64_t)1000;
++      }
++      status = ARES_SUCCESS;
++    }
++  #endif /* __QNX__ */
++
+   return status;
+ }
+ 
+ /* This function will only return ARES_SUCCESS or ARES_ENOMEM.  Any other
+  * conditions are ignored.  Users may mess up config files, but we want to
+diff --git a/src/lib/record/ares_dns_multistring.c b/src/lib/record/ares_dns_multistring.c
+index 57c0d1c0..44fcaccd 100644
+--- a/src/lib/record/ares_dns_multistring.c
++++ b/src/lib/record/ares_dns_multistring.c
+@@ -144,10 +144,22 @@ ares_status_t ares_dns_multistring_add_own(ares_dns_multistring_t *strs,
+   status = ares_array_insert_last((void **)&data, strs->strs);
+   if (status != ARES_SUCCESS) {
+     return status;
+   }
+ 
++  /* Issue #921, ares_dns_multistring_get() doesn't have a way to indicate
++   * success or fail on a zero-length string which is actually valid.  So we
++   * are going to allocate a 1-byte buffer to use as a placeholder in this
++   * case */
++  if (str == NULL) {
++    str = ares_malloc_zero(1);
++    if (str == NULL) {
++      ares_array_remove_last(strs->strs);
++      return ARES_ENOMEM;
++    }
++  }
++
+   data->data = str;
+   data->len  = len;
+ 
+   return ARES_SUCCESS;
+ }
+@@ -250,40 +262,42 @@ ares_status_t ares_dns_multistring_parse_buf(ares_buf_t *buf,
+     status = ares_buf_fetch_bytes(buf, &len, 1);
+     if (status != ARES_SUCCESS) {
+       break; /* LCOV_EXCL_LINE: DefensiveCoding */
+     }
+ 
+-    if (len) {
+-      /* When used by the _str() parser, it really needs to be validated to
+-       * be a valid printable ascii string.  Do that here */
+-      if (validate_printable && ares_buf_len(buf) >= len) {
+-        size_t      mylen;
+-        const char *data = (const char *)ares_buf_peek(buf, &mylen);
+-        if (!ares_str_isprint(data, len)) {
+-          status = ARES_EBADSTR;
+-          break;
+-        }
++
++    /* When used by the _str() parser, it really needs to be validated to
++     * be a valid printable ascii string.  Do that here */
++    if (len && validate_printable && ares_buf_len(buf) >= len) {
++      size_t      mylen;
++      const char *data = (const char *)ares_buf_peek(buf, &mylen);
++      if (!ares_str_isprint(data, len)) {
++        status = ARES_EBADSTR;
++        break;
+       }
++    }
+ 
+-      if (strs != NULL) {
+-        unsigned char *data = NULL;
++    if (strs != NULL) {
++      unsigned char *data = NULL;
++      if (len) {
+         status = ares_buf_fetch_bytes_dup(buf, len, ARES_TRUE, &data);
+         if (status != ARES_SUCCESS) {
+           break;
+         }
+-        status = ares_dns_multistring_add_own(*strs, data, len);
+-        if (status != ARES_SUCCESS) {
+-          ares_free(data);
+-          break;
+-        }
+-      } else {
+-        status = ares_buf_consume(buf, len);
+-        if (status != ARES_SUCCESS) {
+-          break;
+-        }
++      }
++      status = ares_dns_multistring_add_own(*strs, data, len);
++      if (status != ARES_SUCCESS) {
++        ares_free(data);
++        break;
++      }
++    } else {
++      status = ares_buf_consume(buf, len);
++      if (status != ARES_SUCCESS) {
++        break;
+       }
+     }
++
+   }
+ 
+   if (status != ARES_SUCCESS && strs != NULL) {
+     ares_dns_multistring_destroy(*strs);
+     *strs = NULL;
+diff --git a/test/ares-test-parse-txt.cc b/test/ares-test-parse-txt.cc
+index 173d0bde..07b77adb 100644
+--- a/test/ares-test-parse-txt.cc
++++ b/test/ares-test-parse-txt.cc
+@@ -36,11 +36,11 @@ TEST_F(LibraryTest, ParseTxtReplyOK) {
+   DNSPacket pkt;
+   std::string expected1 = "txt1.example.com";
+   std::string expected2a = "txt2a";
+   std::string expected2b("ABC\0ABC", 7);
+   pkt.set_qid(0x1234).set_response().set_aa()
+-    .add_question(new DNSQuestion("example.com", T_MX))
++    .add_question(new DNSQuestion("example.com", T_TXT))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected2a, expected2b}));
+   std::vector<byte> data = pkt.data();
+ 
+   struct ares_txt_reply* txt = nullptr;
+@@ -66,11 +66,11 @@ TEST_F(LibraryTest, ParseTxtExtReplyOK) {
+   DNSPacket pkt;
+   std::string expected1 = "txt1.example.com";
+   std::string expected2a = "txt2a";
+   std::string expected2b("ABC\0ABC", 7);
+   pkt.set_qid(0x1234).set_response().set_aa()
+-    .add_question(new DNSQuestion("example.com", T_MX))
++    .add_question(new DNSQuestion("example.com", T_TXT))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected2a, expected2b}));
+   std::vector<byte> data = pkt.data();
+ 
+   struct ares_txt_ext* txt = nullptr;
+@@ -93,10 +93,43 @@ TEST_F(LibraryTest, ParseTxtExtReplyOK) {
+   EXPECT_EQ(nullptr, txt3->next);
+   EXPECT_EQ(0, txt3->record_start);
+   ares_free_data(txt);
+ }
+ 
++TEST_F(LibraryTest, ParseTxtEmpty) {
++  DNSPacket pkt;
++  std::string expected1 = "";
++  pkt.set_qid(0x1234).set_response().set_aa()
++    .add_question(new DNSQuestion("example.com", T_TXT))
++    .add_answer(new DNSTxtRR("example.com", 100, {expected1}));
++  std::vector<byte> data = pkt.data();
++
++  ares_dns_record_t   *dnsrec = NULL;
++  ares_dns_rr_t       *rr     = NULL;
++  EXPECT_EQ(ARES_SUCCESS, ares_dns_parse(data.data(), data.size(), 0, &dnsrec));
++  EXPECT_EQ(1, ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER));
++  rr = ares_dns_record_rr_get(dnsrec, ARES_SECTION_ANSWER, 0);
++  ASSERT_NE(nullptr, rr);
++  EXPECT_EQ(ARES_REC_TYPE_TXT, ares_dns_rr_get_type(rr));
++
++  size_t txtdata_len;
++  const unsigned char *txtdata;
++
++  /* Using array methodology */
++  EXPECT_EQ(1, ares_dns_rr_get_abin_cnt(rr, ARES_RR_TXT_DATA));
++  txtdata = ares_dns_rr_get_abin(rr, ARES_RR_TXT_DATA, 0, &txtdata_len);
++  EXPECT_EQ(txtdata_len, 0);
++  EXPECT_NE(nullptr, txtdata);
++
++  /* Using combined methodology */
++  txtdata = ares_dns_rr_get_bin(rr, ARES_RR_TXT_DATA, &txtdata_len);
++  EXPECT_EQ(txtdata_len, 0);
++  EXPECT_NE(nullptr, txtdata);
++
++  ares_dns_record_destroy(dnsrec); dnsrec = NULL;
++}
++
+ TEST_F(LibraryTest, ParseTxtMalformedReply1) {
+   std::vector<byte> data = {
+     0x12, 0x34,  // qid
+     0x84, // response + query + AA + not-TC + not-RD
+     0x00, // not-RA + not-Z + not-AD + not-CD + rc=NoError
+@@ -211,11 +244,11 @@ TEST_F(LibraryTest, ParseTxtReplyErrors) {
+   DNSPacket pkt;
+   std::string expected1 = "txt1.example.com";
+   std::string expected2a = "txt2a";
+   std::string expected2b = "txt2b";
+   pkt.set_qid(0x1234).set_response().set_aa()
+-    .add_question(new DNSQuestion("example.com", T_MX))
++    .add_question(new DNSQuestion("example.com", T_TXT))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("example.com", 100, {expected2a, expected2b}));
+   std::vector<byte> data = pkt.data();
+   struct ares_txt_reply* txt = nullptr;
+@@ -225,11 +258,11 @@ TEST_F(LibraryTest, ParseTxtReplyErrors) {
+   pkt.questions_.clear();
+   data = pkt.data();
+   txt = nullptr;
+   EXPECT_EQ(ARES_EBADRESP, ares_parse_txt_reply(data.data(), (int)data.size(), &txt));
+   EXPECT_EQ(nullptr, txt);
+-  pkt.add_question(new DNSQuestion("example.com", T_MX));
++  pkt.add_question(new DNSQuestion("example.com", T_TXT));
+ 
+ #ifdef DISABLED
+   // Question != answer
+   pkt.questions_.clear();
+   pkt.add_question(new DNSQuestion("Axample.com", T_TXT));
+@@ -238,17 +271,17 @@ TEST_F(LibraryTest, ParseTxtReplyErrors) {
+   pkt.questions_.clear();
+   pkt.add_question(new DNSQuestion("example.com", T_TXT));
+ #endif
+ 
+   // Two questions.
+-  pkt.add_question(new DNSQuestion("example.com", T_MX));
++  pkt.add_question(new DNSQuestion("example.com", T_TXT));
+   data = pkt.data();
+   txt = nullptr;
+   EXPECT_EQ(ARES_EBADRESP, ares_parse_txt_reply(data.data(), (int)data.size(), &txt));
+   EXPECT_EQ(nullptr, txt);
+   pkt.questions_.clear();
+-  pkt.add_question(new DNSQuestion("example.com", T_MX));
++  pkt.add_question(new DNSQuestion("example.com", T_TXT));
+ 
+   // No answer.
+   pkt.answers_.clear();
+   data = pkt.data();
+   txt = nullptr;
+@@ -272,11 +305,11 @@ TEST_F(LibraryTest, ParseTxtReplyAllocFail) {
+   DNSPacket pkt;
+   std::string expected1 = "txt1.example.com";
+   std::string expected2a = "txt2a";
+   std::string expected2b = "txt2b";
+   pkt.set_qid(0x1234).set_response().set_aa()
+-    .add_question(new DNSQuestion("example.com", T_MX))
++    .add_question(new DNSQuestion("example.com", T_TXT))
+     .add_answer(new DNSCnameRR("example.com", 300, "c.example.com"))
+     .add_answer(new DNSTxtRR("c.example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("c.example.com", 100, {expected1}))
+     .add_answer(new DNSTxtRR("c.example.com", 100, {expected2a, expected2b}));
+   std::vector<byte> data = pkt.data();
