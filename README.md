@@ -8,6 +8,8 @@ c-ares packages for QNX are made available for download at https://qnx.haxx.se/
 
 ## Prerequisites
 
+Works with c-ares 1.34.4 or later.
+
 1. Install the QNX SDK environments for 7.0, 7.1 and 8.0.
 2. Edit `setup` to make the path identify your chosen SDP install paths
 

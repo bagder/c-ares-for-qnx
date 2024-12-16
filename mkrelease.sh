@@ -49,14 +49,6 @@ tar xf "$tarball"
 caresver=$(grep '#define ARES_VERSION_STR ' c-ares-*/include/ares_version.h | sed 's/[^0-9.]//g')
 buildver="$caresver-$build"
 
-echo "Apply qnx-1.34.3 patch"
-pushd c-ares-$caresver >/dev/null
-patch -p1 < ../qnx-1.34.3.patch
-
-echo "autoreconf"
-autoreconf -fi
-popd >/dev/null
-
 echo "Create QNX c-ares release $buildver"
 
 # install everything here
